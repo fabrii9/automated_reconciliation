@@ -6,8 +6,10 @@ import logging
 from datetime import datetime
 import re
 from odoo.exceptions import UserError
+import time
 
 _logger = logging.getLogger(__name__)
+
 
 class AutomatedReconciliationConfig(models.Model):
     _name = 'automated.reconciliation.config'
@@ -27,15 +29,15 @@ class AutomatedReconciliationConfig(models.Model):
     tolerance = fields.Float(string="Tolerancia", digits=(12, 4), required=True)
 
     account_credit_id = fields.Integer(
-        string="Cuenta de haber (ID)", 
-        help="ID de la cuenta contable que tendrá el movimiento en el haber", 
+        string="Cuenta de haber (ID)",
+        help="ID de la cuenta contable que tendrá el movimiento en el haber",
         required=True
-        )
+    )
     account_debit_id = fields.Integer(
-        string="Cuenta de debe (ID)", 
+        string="Cuenta de debe (ID)",
         help="ID de la cuenta contable que tendrá el movimiento en el debe",
         required=True
-        )
+    )
 
     log_ids = fields.One2many('automated.reconciliation.log', 'config_id', string="Logs")
 
@@ -113,6 +115,32 @@ class AutomatedReconciliationConfig(models.Model):
                     }
                 }
 
+            except xmlrpc.client.ProtocolError as e:
+                # Manejo específico para errores HTTP desde XML-RPC
+                if getattr(e, "errcode", None) == 429:
+                    error_message = (
+                        "El servidor remoto devolvió 429 Too Many Requests "
+                        "incluso después de reintentar. Probá de nuevo en unos minutos."
+                    )
+                else:
+                    error_message = f"Error HTTP al ejecutar conciliación (código {e.errcode}): {e}"
+
+                self.env['automated.reconciliation.log'].create({
+                    'config_id': config.id,
+                    'is_summary': True,
+                    'messages': error_message,
+                })
+
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'message': error_message,
+                        'type': 'danger',
+                        'sticky': True,
+                    }
+                }
+
             except Exception as e:
                 error_message = f"Error al ejecutar conciliación: {str(e)}"
                 self.env['automated.reconciliation.log'].create({
@@ -147,7 +175,8 @@ class AutomatedReconciliationConfig(models.Model):
             'target': 'new',
         }
 
-    def _run_script(self, url, db, username, password, journal_filter, target_account_id, target_date, target_date_end, tolerance):
+    def _run_script(self, url, db, username, password, journal_filter,
+                    target_account_id, target_date, target_date_end, tolerance):
         common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
         uid = common.authenticate(db, username, password, {})
         if not uid:
@@ -156,8 +185,50 @@ class AutomatedReconciliationConfig(models.Model):
         models = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object")
 
         def api_call(model_name, func, args, kwargs=None):
+            """
+            Wrapper para execute_kw con manejo de HTTP 429 (Too Many Requests)
+            y reintentos con backoff incremental.
+            """
             kwargs = kwargs or {}
-            return models.execute_kw(db, uid, password, model_name, func, args, kwargs)
+            max_retries = 5
+            base_backoff = 2  # segundos
+
+            attempt = 0
+            while True:
+                try:
+                    return models.execute_kw(
+                        db,
+                        uid,
+                        password,
+                        model_name,
+                        func,
+                        args,
+                        kwargs,
+                    )
+
+                except xmlrpc.client.ProtocolError as e:
+                    # Rate limit (429) → reintentamos con backoff
+                    if getattr(e, "errcode", None) == 429 and attempt < max_retries:
+                        attempt += 1
+                        delay = base_backoff * attempt
+                        _logger.warning(
+                            "HTTP 429 en conciliación automática "
+                            "(modelo %s, método %s). Reintento %s/%s en %ss",
+                            model_name,
+                            func,
+                            attempt,
+                            max_retries,
+                            delay,
+                        )
+                        time.sleep(delay)
+                        continue
+
+                    # Si agotamos reintentos o es otro error HTTP, relanzamos
+                    raise
+
+                except Exception:
+                    # Otros errores se relanzan tal cual
+                    raise
 
         def extract_numeric_ref(ref_value):
             if not ref_value:
@@ -187,8 +258,8 @@ class AutomatedReconciliationConfig(models.Model):
             amount_val = line['amount']
 
             domain_candidato = [
-            ("account_id", "=", target_account_id),
-            ("date", "=", date_val),
+                ("account_id", "=", target_account_id),
+                ("date", "=", date_val),
             ]
             numeric_ref = False
             if self.payment_ref:
@@ -211,7 +282,7 @@ class AutomatedReconciliationConfig(models.Model):
                 linea = api_call('account.bank.statement.line', 'search_read', [[("id", "=", diario_id)]])
                 apunte_contable = api_call('account.move', 'search_read', [[('id', '=', linea[0]['move_id'][0])]])
                 line_to_assign = 0
-                #TODO : Agregar ID del recibo de pago.
+                # TODO: Agregar ID del recibo de pago.
                 for l in apunte_contable[0]['line_ids']:
                     line_to_assign = 0
                     try:
@@ -220,20 +291,20 @@ class AutomatedReconciliationConfig(models.Model):
                             dicttionary = {
                                 'partner_id': candidatos[0]['partner_id'][0],
                                 'account_id': self.account_debit_id,
-                                }
+                            }
                             line_to_assign = 1
                             api_call('account.move.line', 'write', [[l], dicttionary])
                             break
-                        
+
                         elif l_id[0]['debit'] < 0.0:
                             dicttionary = {
                                 'partner_id': candidatos[0]['partner_id'][0],
                                 'account_id': self.account_credit_id
-                                }
+                            }
                             api_call('account.move.line', 'write', [[l], dicttionary])
                             line_to_assign = 0
                             break
-    
+
                         elif l_id[0]['credit'] > 0.0:
                             dicttionary = {
                                 'account_id': self.account_credit_id,
@@ -256,18 +327,22 @@ class AutomatedReconciliationConfig(models.Model):
 
                     except Exception as e:
                         _logger.error(f"Error al procesar la línea contable: {str(e)}")
+
                 try:
                     lineas_move = apunte_contable[0]['line_ids']
                     for linea_id in lineas_move:
-                        # move_line = api_call('account.move.line', 'read', [linea_id], ['account_id'])
-                        move_line = api_call('account.move.line', 'search_read', [[('id','=',linea_id)]])
+                        move_line = api_call('account.move.line', 'search_read', [[('id', '=', linea_id)]])
                         if line_to_assign == 1:
-                            move_line_write = api_call('account.move.line', 'write', [[lineas_move[line_to_assign]], 
-                            {
-                                'account_id':self.account_credit_id,
-                                'partner_id': matching[0]['partner_id'][0],
-                                'name': f'Pago de cliente ${l_id[0]["debit"]} - {matching[0]["partner_id"][1]} - {formatted_date}'
-                            }])
+                            move_line_write = api_call(
+                                'account.move.line',
+                                'write',
+                                [[lineas_move[line_to_assign]],
+                                 {
+                                     'account_id': self.account_credit_id,
+                                     'partner_id': matching[0]['partner_id'][0],
+                                     'name': f'Pago de cliente ${l_id[0]["debit"]} - {matching[0]["partner_id"][1]} - {formatted_date}'
+                                 }]
+                            )
                             line_to_assign = 0
                             pass
                         if move_line and move_line[0]['account_id'][0] == matching[0]['account_id'][0]:
@@ -275,7 +350,7 @@ class AutomatedReconciliationConfig(models.Model):
                                 api_call('account.move.line', 'reconcile', [[linea_id, matching[0]['id']]])
                                 break
                             except Exception as e:
-                                _logger.info(f"Error al reconciliar: Todo bien, si concilió")
+                                _logger.info("Error al reconciliar: Todo bien, si concilió")
 
                     api_call('account.bank.statement.line', 'write', [[diario_id], {"is_reconciled": True}])
                 except Exception as e:
