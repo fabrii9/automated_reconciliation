@@ -1,0 +1,56 @@
+<odoo>
+  <!-- Vistas para el modelo automated.reconciliation.log -->
+  <record id="view_automated_reconciliation_log_tree" model="ir.ui.view">
+    <field name="name">automated.reconciliation.log.tree</field>
+    <field name="model">automated.reconciliation.log</field>
+    <field name="arch" type="xml">
+      <tree string="Reconciliation Logs">
+        <field name="execution_date" />
+        <field name="config_id" />
+        <field name="is_summary" />
+        <field name="payment_ref" />
+        <field name="encontrados" />
+        <field name="coincidencias" />
+        <field name="conciliado" />
+        <field name="messages" />
+      </tree>
+
+    </field>
+  </record>
+
+  <record id="view_automated_reconciliation_log_form" model="ir.ui.view">
+    <field name="name">automated.reconciliation.log.form</field>
+    <field name="model">automated.reconciliation.log</field>
+    <field name="arch" type="xml">
+      <form string="Reconciliation Log">
+        <sheet>
+          <group>
+            <field name="execution_date" />
+            <field name="config_id" />
+            <field name="is_summary" />
+            <field name="payment_ref" />
+            <field name="encontrados" />
+            <field name="coincidencias" />
+            <field name="conciliado" />
+            <field name="messages" nolabel="1" />
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <!-- Acción para abrir la vista de logs (tree, form) -->
+  <record id="action_automated_reconciliation_log" model="ir.actions.act_window">
+    <field name="name">Reconciliation Logs</field>
+    <field name="res_model">automated.reconciliation.log</field>
+    <field name="view_mode">tree,form</field>
+    <field name="domain">[]</field>
+  </record>
+
+  <!-- Submenú "Logs" -->
+  <menuitem id="menu_automated_reconciliation_logs"
+    name="Logs"
+    parent="menu_automated_reconciliation_root"
+    action="action_automated_reconciliation_log"
+    sequence="20" />
+</odoo>

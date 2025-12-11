@@ -1,0 +1,93 @@
+<odoo>
+    <record id="view_automated_reconciliation_config_form" model="ir.ui.view">
+        <field name="name">automated.reconciliation.config.form</field>
+        <field name="model">automated.reconciliation.config</field>
+        <field name="arch" type="xml">
+            <form string="Configuración de Conciliación Automática">
+                <header>
+                    <button name="action_execute_reconciliation"
+                            type="object"
+                            string="Ejecutar conciliación"
+                            class="btn-primary"
+                            context="{'default_id': active_id}" />
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                      	    <field name="name"/>
+                            <field name="url"/>
+                            <field name="db"/>
+                            <field name="username"/>
+                            <field name="password" password="True"/>
+                        </group>
+                        <group>
+                            <field name="journal_filter"/>
+                            <field name="target_account_id"/>
+                            <field name="target_date"/>
+                            <field name="target_date_end"/>
+                            <field name="tolerance"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Parámetros Avanzados">
+                            <group name="account_configuration">
+                                <label string="Configuración de Cuentas" for="account_credit_id" help="Configuracion  de cuentas"/>
+                                <group>
+                                    <field name="account_credit_id"/>
+                                    <field name="account_debit_id"/>
+                                </group>
+                            </group>
+                        </page>
+                        <page string="Configuración Extra">
+                            <h3>Destilde los campos por los cuales elija NO matchear</h3>
+                            <group>
+                                <group>
+                                    <field name="payment_ref"/>
+                                    <field name="date"/>
+                                    <field name="amount"/>
+                                    <field name="account"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+
+                </sheet>
+            </form>
+        </field>
+    </record>
+  
+    <record id="view_automated_reconciliation_config_tree" model="ir.ui.view">
+        <field name="name">automated.reconciliation.config.tree</field>
+        <field name="model">automated.reconciliation.config</field>
+        <field name="arch" type="xml">
+            <tree string="Configuraciones de Conciliación">
+                <field name="name"/>
+                <field name="url"/>
+                <field name="db"/>
+                <field name="username"/>
+                <field name="journal_filter"/>
+                <field name="target_account_id"/>
+                <field name="target_date"/>
+                <field name="tolerance"/>
+            </tree>
+        </field>
+    </record>
+    
+  
+    <record id="action_automated_reconciliation_config" model="ir.actions.act_window">
+        <field name="name">Configuraciones de Conciliación</field>
+        <field name="res_model">automated.reconciliation.config</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p>Cree y edite configuraciones para ejecutar conciliaciones automáticas vía XML-RPC.</p>
+        </field>
+    </record>
+  
+    <menuitem id="menu_automated_reconciliation_root" name="Conciliación Automática"/>
+  
+    <menuitem id="menu_automated_reconciliation_config"
+              name="Configuraciones"
+              parent="menu_automated_reconciliation_root"
+              action="action_automated_reconciliation_config"/>
+</odoo>
+  
